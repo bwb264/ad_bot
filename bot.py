@@ -1,4 +1,100 @@
-: {response.text[:200]}")
+import os
+import logging
+import asyncio
+import tempfile
+import time
+import requests
+import base64
+from telegram import Update
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    filters, ContextTypes,
+)
+from groq import Groq
+from gtts import gTTS
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
+GROQ_API_KEY      = os.environ.get("GROQ_API_KEY", "")
+SHOTSTACK_API_KEY = os.environ.get("SHOTSTACK_API_KEY", "")
+SHOTSTACK_ENV     = "stage"  # sandbox مجاني
+
+groq_client = Groq(api_key=GROQ_API_KEY)
+
+# ─── توليد نص الإعلان ────────────────────────────────────────────────────────
+def generate_ad_text(product_description: str) -> str:
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        max_tokens=400,
+        messages=[
+            {"role": "system", "content": "أنت خبير تسويق محترف متخصص في كتابة الإعلانات العربية الجذابة."},
+            {"role": "user", "content": f"""اكتب نصاً إعلانياً احترافياً باللغة العربية لهذا المنتج.
+وصف المنتج: {product_description}
+متطلبات:
+- لا تتجاوز 80 كلمة
+- ابدأ بجملة تشويقية
+- اذكر المزايا الرئيسية
+- اختتم بدعوة للعمل
+- لا تستخدم أقواس أو نجوم
+- اكتب النص فقط بدون تعليقات"""}
+        ]
+    )
+    return response.choices[0].message.content.strip()
+
+# ─── رفع الصورة على Shotstack ─────────────────────────────────────────────────
+def upload_image_to_shotstack(image_path: str) -> str:
+    with open(image_path, "rb") as f:
+        image_data = base64.b64encode(f.read()).decode("utf-8")
+
+    headers = {
+        "x-api-key": SHOTSTACK_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "url": f"data:image/jpeg;base64,{image_data}"
+    }
+    response = requests.post(
+        f"https://api.shotstack.io/{SHOTSTACK_ENV}/assets",
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+    if response.status_code not in [200, 201]:
+        raise Exception("فشل رفع الصورة: " + response.text[:200])
+
+    data = response.json()
+    return data.get("data", {}).get("attributes", {}).get("url", "")
+
+# ─── توليد الصوت ─────────────────────────────────────────────────────────────
+def generate_voice_sync(text: str, output_path: str):
+    tts = gTTS(text=text, lang="ar", slow=False)
+    tts.save(output_path)
+
+# ─── رفع الصوت على Shotstack ──────────────────────────────────────────────────
+def upload_audio_to_shotstack(audio_path: str) -> str:
+    with open(audio_path, "rb") as f:
+        audio_data = base64.b64encode(f.read()).decode("utf-8")
+
+    headers = {
+        "x-api-key": SHOTSTACK_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "url": f"data:audio/mpeg;base64,{audio_data}"
+    }
+    response = requests.post(
+        f"https://api.shotstack.io/{SHOTSTACK_ENV}/assets",
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+    if response.status_code not in [200, 201]:
+        raise Exception("فشل رفع الصوت: " + response.text[:200])
 
     data = response.json()
     return data.get("data", {}).get("attributes", {}).get("url", "")
@@ -59,7 +155,7 @@ def create_video_shotstack(image_url: str, audio_url: str, duration: float = 30)
     )
 
     if response.status_code not in [200, 201]:
-        raise Exception(f"فشل إنشاء الفيديو: {response.text[:300]}")
+        raise Exception("فشل انشاء الفيديو: " + response.text[:300])
 
     render_id = response.json()["response"]["id"]
     return render_id
