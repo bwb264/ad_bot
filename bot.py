@@ -9,7 +9,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler
 )
 from groq import Groq
-import edge_tts
+from gtts import gTTS
 from moviepy.editor import (
     ImageClip, AudioFileClip, CompositeVideoClip,
     VideoFileClip, concatenate_videoclips
@@ -74,9 +74,8 @@ def generate_ad_text(product_description: str) -> str:
 
 # ─── توليد الصوت ─────────────────────────────────────────────────────────────
 async def generate_voice(text: str, output_path: str):
-    voice = "ar-SA-ZariyahNeural"  # صوت عربي سعودي أنثوي
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(output_path)
+    tts = gTTS(text=text, lang="ar", slow=False)
+    tts.save(output_path)
 
 
 # ─── إنشاء خلفية متدرجة ──────────────────────────────────────────────────────
@@ -263,3 +262,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
